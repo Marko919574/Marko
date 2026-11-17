@@ -12,13 +12,13 @@
 /* Layout: Kopfzeile mit Bestand, ein Arbeitsbereich je Tab, feste Tab-Leiste unten, Kamera als Vollbild-Ebene. Regalnummern sehen aus wie gelbe Regalschilder. */
 :root{
   --bg:#EDEFF2; --surface:#FFFFFF; --ink:#17202B; --muted:#5C6877; --line:#D3D8DF;
-  --accent:#0B5C8E; --accent-ink:#FFFFFF; --tag:#FFD23F; --tag-ink:#1B1600; --ok:#1E7A4B; --warn:#B3261E;
+  --accent:#0B5C8E; --accent-ink:#FFFFFF; --tag:#FFD23F; --tag-ink:#1B1600; --ok:#1E7A4B; --warn:#B3261E; --amber:#B35C00;
   --display:'Arial Narrow','Roboto Condensed','Helvetica Neue',Arial,sans-serif;
   --body:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
   --mono:ui-monospace,'Roboto Mono',Menlo,Consolas,monospace;
 }
 @media (prefers-color-scheme: dark){
-  :root{--bg:#12181F; --surface:#1B242E; --ink:#E8ECF1; --muted:#9AA6B4; --line:#2D3947; --accent:#5AB0E6; --accent-ink:#06121C; --ok:#5BD08F; --warn:#FF8A80; color-scheme:dark}
+  :root{--bg:#12181F; --surface:#1B242E; --ink:#E8ECF1; --muted:#9AA6B4; --line:#2D3947; --accent:#5AB0E6; --accent-ink:#06121C; --ok:#5BD08F; --warn:#FF8A80; --amber:#FFB020; color-scheme:dark}
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -34,7 +34,7 @@ header{display:flex; flex-direction:column; gap:4px; margin-bottom:16px}
 #login .card{width:100%; max-width:420px; margin-top:8vh} #login h2{font-family:var(--display); font-size:28px; margin:0 0 4px}
 #loginMsg{min-height:22px; margin:8px 0 0; font-weight:600} #loginMsg.warn{color:var(--warn)}
 #msg{min-height:24px; margin:0 0 12px; font-weight:600}
-#msg.ok{color:var(--ok)} #msg.warn{color:var(--warn)}
+#msg.ok{color:var(--ok)} #msg.warn{color:var(--warn)} #msg.same{color:var(--amber)} #msg.moved{color:var(--accent)}
 label,.lab{display:block; font-family:var(--display); font-weight:700; font-size:15px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:6px}
 .row{display:flex; gap:8px; align-items:stretch} .row>*{min-width:0}
 input[type=text],input[type=email],input[type=password],textarea{width:100%; font-family:var(--mono); font-weight:600; font-size:18px; color:var(--ink); background:var(--surface);
@@ -80,7 +80,7 @@ details .inner{padding:0 12px 12px}
 #scan .frame.hit{border-color:#3ddc84}
 #scan .bar{position:relative; margin-top:auto; padding:16px max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));
   background:rgba(0,0,0,.72); color:#fff; display:flex; flex-direction:column; gap:12px}
-#scanMsg{margin:0; min-height:24px; font-weight:600; text-align:center}
+#scanMsg{margin:0; min-height:26px; font-weight:700; font-size:18px; text-align:center}
 #scan .bar button{background:#fff; color:#111; border-color:#fff}
 </style>
 </head>
@@ -291,19 +291,27 @@ function prepAudio() {
     if (actx && actx.state === 'suspended') actx.resume();
   } catch (e) {}
 }
-function beep() {
+const SCAN_COLORS = {ok: '#3DDC84', same: '#FFB020', moved: '#6EC1FF', warn: '#FF8A80'};
+function beep(kind) {
   if (!actx) return;
-  try {
-    const t = actx.currentTime, o = actx.createOscillator(), g = actx.createGain();
-    o.type = 'square'; o.frequency.value = 1800;
-    g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
-    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.18);
-  } catch (e) {}
+  const tone = (f, at, dur) => {
+    try {
+      const t = actx.currentTime + at, o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'square'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+    } catch (e) {}
+  };
+  if (kind === 'same') { tone(900, 0, 0.12); tone(900, 0.2, 0.12); }
+  else if (kind === 'warn') tone(400, 0, 0.35);
+  else tone(1800, 0, 0.16);
 }
 
 /* ---------- Kamera: Barcode direkt im Live-Bild ---------- */
 const Scanner = {
   active: false, stream: null, timer: 0, cb: null, continuous: false, last: '', lastT: 0, detector: null, zx: null, canvas: null,
+  lockOrient() { try { const o = screen.orientation; if (o && o.lock) o.lock(o.type).catch(() => {}); } catch (e) {} },
+  unlockOrient() { try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {} },
   async open(cb, continuous) {
     if (this.active) return;
     prepAudio();
@@ -317,8 +325,9 @@ const Scanner = {
     }
     const v = $('#vid'); v.srcObject = this.stream;
     try { await v.play(); } catch (e) {}
-    $('#scanMsg').textContent = 'Barcode in den Rahmen halten';
+    $('#scanMsg').textContent = 'Barcode in den Rahmen halten'; $('#scanMsg').style.color = '';
     $('#scan').hidden = false; this.active = true;
+    this.lockOrient();
     if ('BarcodeDetector' in window) { try { this.detector = new BarcodeDetector(); } catch (e) { this.detector = null; } }
     if (!this.detector) await this.loadZx();
     this.loop();
@@ -357,11 +366,15 @@ const Scanner = {
         code = code.trim(); const now = Date.now();
         if (code && !(code === this.last && now - this.lastT < 3000)) {
           this.last = code; this.lastT = now;
-          beep(); if (navigator.vibrate) navigator.vibrate(80);
-          const fr = document.querySelector('#scan .frame'); fr.classList.add('hit'); setTimeout(() => fr.classList.remove('hit'), 400);
-          if (!this.continuous) { const cb = this.cb; this.close(); cb(code); return; }
-          const text = await this.cb(code);
-          if (text && this.active) $('#scanMsg').textContent = text;
+          if (!this.continuous) { beep(); if (navigator.vibrate) navigator.vibrate(80); const cb = this.cb; this.close(); cb(code); return; }
+          const r = await this.cb(code);
+          const obj = r && typeof r === 'object', text = obj ? r.text : r, kind = obj ? r.kind : 'warn';
+          beep(kind); if (navigator.vibrate) navigator.vibrate(kind === 'same' ? [60, 60, 60] : 80);
+          if (text && this.active) {
+            const col = SCAN_COLORS[kind] || '#fff', m = $('#scanMsg'), fr = document.querySelector('#scan .frame');
+            m.textContent = text; m.style.color = col; fr.style.borderColor = col;
+            setTimeout(() => { fr.style.borderColor = ''; }, 700);
+          }
         }
       }
       if (this.active) this.timer = setTimeout(() => this.loop(), 120);
@@ -371,6 +384,7 @@ const Scanner = {
     this.active = false; clearTimeout(this.timer);
     if (this.stream) this.stream.getTracks().forEach(t => t.stop());
     this.stream = null; $('#vid').srcObject = null; $('#scan').hidden = true;
+    this.unlockOrient();
   }
 };
 const scan = (cb, continuous) => Scanner.open(cb, continuous);
@@ -457,21 +471,21 @@ function setRegal(v) {
 function clearRegal() { activeRegal = ''; ls.del('rl_regal'); msg(''); drawIn(); const r = $('#rin'); if (r) r.focus(); }
 function addItem(v) {
   v = String(v || '').trim(); const input = $('#sin');
-  if (!v || !activeRegal) return '';
+  if (!v || !activeRegal) return {text: '', kind: 'warn'};
   let text, cls = 'ok';
   if (regals().has(key(v))) { text = `„${v}“ ist ein Regal. Tippe auf „Regal wechseln“.`; cls = 'warn'; }
   else {
-    const old = items.get(idOf(v));
-    put({radsatz: v, regal: activeRegal, ts: Date.now()});
-    if (old && key(old.regal) === key(activeRegal)) text = `${v} war schon in Regal ${activeRegal}.`;
-    else if (old) text = `${v} verschoben: von ${old.regal} nach ${activeRegal}.`;
+    const old = items.get(idOf(v)), same = old && key(old.regal) === key(activeRegal);
+    if (!same) put({radsatz: v, regal: activeRegal, ts: Date.now()});
+    if (same) { text = `${v} war schon in Regal ${activeRegal}.`; cls = 'same'; }
+    else if (old) { text = `${v} verschoben: von ${old.regal} nach ${activeRegal}.`; cls = 'moved'; }
     else text = `${v} liegt jetzt in Regal ${activeRegal}.`;
     recent.unshift({radsatz: v, regal: activeRegal}); recent = recent.slice(0, 8);
     drawRecent(); drawHeader();
   }
   msg(text, cls);
   if (input) { input.value = ''; if (!Scanner.active) input.focus(); }
-  return text;
+  return {text, kind: cls};
 }
 function drawRecent() {
   const r = $('#recent'); if (!r) return;
