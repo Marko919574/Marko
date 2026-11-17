@@ -328,6 +328,12 @@ const Scanner = {
     this.lockOrient();
     const prev = $('#vid'), v = document.createElement('video');
     v.id = 'vid'; v.setAttribute('playsinline', ''); v.setAttribute('muted', ''); v.muted = true; v.autoplay = true;
+    v.style.opacity = '0'; v.style.transition = 'opacity .15s';
+    let shown = false;
+    const show = () => { if (!shown) { shown = true; v.style.opacity = '1'; } };
+    if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(() => requestAnimationFrame(() => requestAnimationFrame(show)));
+    v.addEventListener('playing', () => setTimeout(show, 500), {once: true});
+    setTimeout(show, 1500);
     prev.replaceWith(v); v.srcObject = this.stream;
     try { await v.play(); } catch (e) {}
     if ('BarcodeDetector' in window) { try { this.detector = new BarcodeDetector(); } catch (e) { this.detector = null; } }
