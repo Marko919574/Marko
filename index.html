@@ -323,11 +323,13 @@ const Scanner = {
       msg(e && e.name === 'NotAllowedError' ? 'Kamera-Zugriff ist blockiert. Erlaube die Kamera in den Browser-Einstellungen für diese Seite.' : 'Die Kamera ließ sich nicht starten.', 'warn');
       return;
     }
-    const v = $('#vid'); v.srcObject = this.stream;
-    try { await v.play(); } catch (e) {}
     $('#scanMsg').textContent = 'Barcode in den Rahmen halten'; $('#scanMsg').style.color = '';
     $('#scan').hidden = false; this.active = true;
     this.lockOrient();
+    const prev = $('#vid'), v = document.createElement('video');
+    v.id = 'vid'; v.setAttribute('playsinline', ''); v.setAttribute('muted', ''); v.muted = true; v.autoplay = true;
+    prev.replaceWith(v); v.srcObject = this.stream;
+    try { await v.play(); } catch (e) {}
     if ('BarcodeDetector' in window) { try { this.detector = new BarcodeDetector(); } catch (e) { this.detector = null; } }
     if (!this.detector) await this.loadZx();
     this.loop();
